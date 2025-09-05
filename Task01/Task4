@@ -1,0 +1,140 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+from pathlib import Path
+
+# -------------------------
+# CONFIG
+# -------------------------
+DATA_PATH = "accidents.csv"   # <-- change if needed
+OUT_DIR = Path("outputs")
+OUT_DIR.mkdir(exist_ok=True)
+
+# -------------------------
+# Load dataset
+# -------------------------
+df = pd.read_csv(DATA_PATH)
+print(f"Loaded {DATA_PATH} with {len(df)} rows")
+print("Available columns:", list(df.columns))
+
+# -------------------------
+# Inspect Time column
+# -------------------------
+print("\nSample Time values:")
+print(df["Time"].head(20))
+
+# -------------------------
+# Convert Time to hour
+# -------------------------
+df["hour"] = pd.NaT  # create empty column
+
+# Try format HH:MM
+try:
+    df["hour"] = pd.to_datetime(df["Time"], format="%H:%M", errors="coerce").dt.hour
+except Exception as e:
+    print("Tried %H:%M format ->", e)
+
+# If still empty, try HH:MM:SS
+if df["hour"].isna().all():
+    try:
+        df["hour"] = pd.to_datetime(df["Time"], format="%H:%M:%S", errors="coerce").dt.hour
+    except Exception as e:
+        print("Tried %H:%M:%S format ->", e)
+
+# If still empty, let pandas auto-detect
+if df["hour"].isna().all():
+    df["hour"] = pd.to_datetime(df["Time"], errors="coerce").dt.hour
+
+# If STILL empty, extract first 2 digits
+if df["hour"].isna().all():
+    df["hour"] = df["Time"].astype(str).str[:2].str.extract(r"(\d{1,2})").astype(float)
+
+print("Unique hours extracted:", df["hour"].dropna().unique())
+
+# -------------------------
+# Day of week
+# -------------------------
+df["day_of_week"] = df["Day_of_week"]
+
+# -------------------------
+# Map Accident Severity to numeric
+# -------------------------
+severity_map = {
+    "Slight Injury": 1,
+    "Serious Injury": 2,
+    "Fatal": 3
+}
+df["severity_num"] = df["Accident_severity"].map(severity_map)
+
+# -------------------------
+# Key columns
+# -------------------------
+weather_col = "Weather_conditions"
+road_col = "Road_surface_conditions"
+
+# -------------------------
+# Aggregations
+# -------------------------
+by_hour = df.groupby("hour").size()
+by_weather = df.groupby(weather_col).agg(
+    accidents=("hour", "size"),
+    avg_sev=("severity_num", "mean")
+)
+by_road = df.groupby(road_col).agg(
+    accidents=("hour", "size"),
+    avg_sev=("severity_num", "mean")
+)
+by_dow = df.groupby("day_of_week").size()
+
+# -------------------------
+# Visualizations
+# -------------------------
+plt.figure()
+by_hour.plot(kind="line", marker="o")
+plt.title("Accidents by Hour of Day")
+plt.xlabel("Hour of Day")
+plt.ylabel("Number of Accidents")
+plt.xticks(range(0, 24))
+plt.grid(True, linestyle="--", alpha=0.5)
+plt.savefig(OUT_DIR/"accidents_by_hour.png")
+
+plt.figure()
+by_weather["accidents"].plot(kind="bar")
+plt.title("Accidents by Weather")
+plt.xlabel("Weather Condition")
+plt.ylabel("Number of Accidents")
+plt.xticks(rotation=45)
+plt.savefig(OUT_DIR/"accidents_by_weather.png")
+
+plt.figure()
+by_weather["avg_sev"].plot(kind="bar")
+plt.title("Avg Severity by Weather")
+plt.xlabel("Weather Condition")
+plt.ylabel("Avg Severity (1=Slight, 2=Serious, 3=Fatal)")
+plt.xticks(rotation=45)
+plt.savefig(OUT_DIR/"avg_severity_by_weather.png")
+
+plt.figure()
+by_road["accidents"].plot(kind="bar")
+plt.title("Accidents by Road Condition")
+plt.xlabel("Road Condition")
+plt.ylabel("Number of Accidents")
+plt.xticks(rotation=45)
+plt.savefig(OUT_DIR/"accidents_by_road.png")
+
+plt.figure()
+by_road["avg_sev"].plot(kind="bar")
+plt.title("Avg Severity by Road Condition")
+plt.xlabel("Road Condition")
+plt.ylabel("Avg Severity (1=Slight, 2=Serious, 3=Fatal)")
+plt.xticks(rotation=45)
+plt.savefig(OUT_DIR/"avg_severity_by_road.png")
+
+plt.figure()
+by_dow.plot(kind="bar")
+plt.title("Accidents by Day of Week")
+plt.xlabel("Day of Week")
+plt.ylabel("Number of Accidents")
+plt.xticks(rotation=45)
+plt.savefig(OUT_DIR/"accidents_by_dayofweek.png")
+
+print(f"\n✅ Analysis complete! Charts saved in {OUT_DIR.resolve()}")
