@@ -1,0 +1,170 @@
+# Decision Tree Classifier on Bank Marketing Dataset
+# --------------------------------------------------
+# Requirements:
+# pip install pandas scikit-learn matplotlib numpy
+
+import os
+import io
+import urllib.request
+import zipfile
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import (
+    confusion_matrix,
+    ConfusionMatrixDisplay,
+    roc_curve,
+    auc,
+    classification_report
+)
+from sklearn.tree import DecisionTreeClassifier, plot_tree
+
+# -----------------------------
+# 1) Load dataset (semicolon CSV)
+# -----------------------------
+# Update this path to where you extracted the file
+DATA_PATH = r"J:\python_titanic_graph\bank-additional-full.csv"
+UCI_URL = "https://archive.ics.uci.edu/ml/machine-learning-databases/00222/bank-additional.zip"
+
+def load_bank_marketing():
+    if os.path.exists(DATA_PATH):
+        print(f"Loading dataset from local file: {DATA_PATH}")
+        df = pd.read_csv(DATA_PATH, sep=';')
+    else:
+        print("Local file not found, downloading from UCI...")
+        with urllib.request.urlopen(UCI_URL) as resp:
+            with zipfile.ZipFile(io.BytesIO(resp.read())) as z:
+                with z.open("bank-additional/bank-additional-full.csv") as f:
+                    df = pd.read_csv(f, sep=';')
+    return df
+
+df = load_bank_marketing()
+print(f"Dataset loaded with shape: {df.shape}")
+print("First few rows:\n", df.head())
+print("\nTarget balance:\n", df['y'].value_counts())
+
+# -----------------------------
+# 2) Basic cleaning / target
+# -----------------------------
+df['y'] = (df['y'].str.lower() == 'yes').astype(int)
+
+# Separate features/target
+X = df.drop(columns=['y'])
+y = df['y'].values
+
+# Identify column types
+cat_cols = X.select_dtypes(include=['object']).columns.tolist()
+num_cols = X.select_dtypes(include=[np.number]).columns.tolist()
+
+# -----------------------------
+# 3) Train/val split
+# -----------------------------
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.25, random_state=42, stratify=y
+)
+
+# -----------------------------
+# 4) Preprocess + Model pipeline
+# -----------------------------
+preprocess = ColumnTransformer(
+    transformers=[
+        ("num", "passthrough", num_cols),
+        ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=False), cat_cols),
+    ]
+)
+
+clf = DecisionTreeClassifier(
+    criterion="gini",
+    max_depth=8,              # prevents overfitting
+    min_samples_leaf=50,      # smoother leaves
+    random_state=42
+)
+
+pipe = Pipeline(steps=[
+    ("prep", preprocess),
+    ("model", clf)
+])
+
+pipe.fit(X_train, y_train)
+
+# -----------------------------
+# 5) Evaluation
+# -----------------------------
+y_proba = pipe.predict_proba(X_test)[:, 1]
+y_pred = (y_proba >= 0.5).astype(int)
+
+print("\nClassification report (threshold=0.5):\n")
+print(classification_report(y_test, y_pred, digits=4))
+
+# Confusion Matrix
+cm = confusion_matrix(y_test, y_pred, labels=[0, 1])
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=[0,1])
+disp.plot(values_format='d')
+plt.title("Confusion Matrix (Threshold=0.5)")
+plt.show()
+
+# ROC curve
+fpr, tpr, _ = roc_curve(y_test, y_proba)
+roc_auc = auc(fpr, tpr)
+plt.plot(fpr, tpr, label=f"AUC = {roc_auc:.3f}")
+plt.plot([0, 1], [0, 1], linestyle="--")
+plt.xlabel("False Positive Rate")
+plt.ylabel("True Positive Rate")
+plt.title("ROC Curve")
+plt.legend(loc="lower right")
+plt.show()
+
+# -----------------------------
+# 6) Feature Importances
+# -----------------------------
+def get_feature_names(preprocessor):
+    out_names = []
+    out_names.extend(num_cols)  # numeric passthrough names
+    ohe = preprocessor.named_transformers_['cat']
+    cat_feature_names = ohe.get_feature_names_out(cat_cols)
+    out_names.extend(cat_feature_names.tolist())
+    return out_names
+
+feature_names = get_feature_names(pipe.named_steps['prep'])
+importances = pipe.named_steps['model'].feature_importances_
+
+n_top = 15
+idx = np.argsort(importances)[::-1][:n_top]
+plt.barh(range(n_top), importances[idx])
+plt.yticks(range(n_top), [feature_names[i] for i in idx])
+plt.gca().invert_yaxis()
+plt.xlabel("Importance")
+plt.title("Top Feature Importances (Decision Tree)")
+plt.show()
+
+# -----------------------------
+# 7) Visualize a shallow tree
+# -----------------------------
+viz_tree = DecisionTreeClassifier(
+    criterion="gini",
+    max_depth=3,   # shallow for clarity
+    min_samples_leaf=100,
+    random_state=42
+)
+
+viz_pipe = Pipeline(steps=[
+    ("prep", preprocess),
+    ("model", viz_tree)
+]).fit(X_train, y_train)
+
+plt.figure(figsize=(16, 10))
+plot_tree(
+    viz_pipe.named_steps['model'],
+    feature_names=feature_names,
+    class_names=["No", "Yes"],
+    filled=True,
+    rounded=True,
+    fontsize=8
+)
+plt.title("Decision Tree (Depth=3) – Visualization")
+plt.show()
