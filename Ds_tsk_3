@@ -1,0 +1,145 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.tree import DecisionTreeClassifier, plot_tree
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
+import matplotlib.pyplot as plt
+import seaborn as sns
+import requests
+import io
+
+# 1. Download bank-full.csv from public GitHub mirror
+print("Downloading Bank Marketing dataset (bank‑full.csv)...")
+url = "https://raw.githubusercontent.com/selva86/datasets/master/bank-full.csv"
+
+try:
+    r = requests.get(url)
+    r.raise_for_status()
+    df = pd.read_csv(io.StringIO(r.text), sep=";")
+except Exception as e:
+    raise RuntimeError(f"Failed to download or parse bank-full.csv: {e}")
+
+print(f"Dataset loaded. Shape: {df.shape}")
+print("
+First 3 rows:
+", df.head(3))
+
+# 2. Basic info and target distribution
+print("
+Target variable 'y' (term deposit subscription):")
+print(df["y"].value_counts(normalize=True).round(3))
+
+# 3. Data preprocessing
+print("
+" + "="*60)
+print("DATA PREPROCESSING")
+print("="*60)
+
+# Encode categorical variables (including target)
+cat_cols = df.select_dtypes(include=["object"]).columns
+
+le_dict = {}
+for col in cat_cols:
+    le = LabelEncoder()
+    df[col] = le.fit_transform(df[col].astype(str))
+    le_dict[col] = le
+
+# Features and target
+X = df.drop("y", axis=1)
+y = df["y"]
+
+# Train/test split (stratified by y)
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+print(f"Training set: {X_train.shape}  |  Test set: {X_test.shape}")
+
+# 4. Build and fit Decision Tree
+dt = DecisionTreeClassifier(
+    max_depth=8,
+    min_samples_split=50,
+    min_samples_leaf=20,
+    random_state=42,
+    class_weight="balanced",
+)
+dt.fit(X_train, y_train)
+
+# Predictions and probabilities
+y_pred = dt.predict(X_test)
+y_pred_proba = dt.predict_proba(X_test)[:, 1]
+
+# 5. Evaluate model
+accuracy = dt.score(X_test, y_test)
+auc = roc_auc_score(y_test, y_pred_proba)
+
+print(f"
+Test Accuracy:   {accuracy:.3f}")
+print(f"ROC‑AUC Score:   {auc:.3f}")
+
+print("
+Classification Report:")
+print(classification_report(y_test, y_pred, target_names=["No", "Yes"]))
+
+cm = confusion_matrix(y_test, y_pred)
+print("
+Confusion Matrix:")
+print(cm)
+
+# 6. Feature importance (top 10)
+feature_importance = pd.DataFrame(
+    {"feature": X.columns, "importance": dt.feature_importances_}
+).sort_values("importance", ascending=False).head(10)
+
+print("
+Top 10 Feature Importances:")
+print(feature_importance)
+
+# 7. Save and plot key visuals
+plt.style.use("seaborn-v0_8")
+
+# Confusion matrix heatmap
+plt.figure(figsize=(8, 6))
+sns.heatmap(
+    cm,
+    annot=True,
+    fmt="d",
+    cmap="Blues",
+    xticklabels=["No", "Yes"],
+    yticklabels=["No", "Yes"],
+)
+plt.title("Confusion Matrix — Bank Marketing Decision Tree")
+plt.ylabel("True Label")
+plt.xlabel("Predicted Label")
+plt.tight_layout()
+plt.savefig("bank_cm.png", dpi=300, bbox_inches="tight")
+plt.close()
+
+# Feature importance barplot
+plt.figure(figsize=(10, 6))
+sns.barplot(data=feature_importance, x="importance", y="feature")
+plt.title("Top 10 Features for Term Deposit Prediction")
+plt.xlabel("Importance")
+plt.tight_layout()
+plt.savefig("bank_feature_importance.png", dpi=300, bbox_inches="tight")
+plt.close()
+
+# Plot first 3 levels of the tree
+plt.figure(figsize=(20, 10))
+plot_tree(
+    dt,
+    max_depth=3,
+    feature_names=X.columns,
+    class_names=["No", "Yes"],
+    filled=True,
+    fontsize=10,
+)
+plt.title("Decision Tree (First 3 Levels) — Predict Term Deposit Subscription")
+plt.savefig("bank_tree.png", dpi=300, bbox_inches="tight")
+plt.close()
+
+print("
+✅ Decision tree built, evaluated, and plots saved:")
+print("  bank_cm.png                → Confusion matrix")
+print("  bank_feature_importance.png  → Top 10 important features")
+print("  bank_tree.png              → Decision tree visualization")
